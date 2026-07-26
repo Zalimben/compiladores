@@ -49,7 +49,7 @@
 // Fin Codigos
 #define TAMBUFF 	5
 #define TAMLEX 		50
-#define TAMHASH 	101
+#define TAMHASH 	102
 
 /************* Estructuras ********************/
 
