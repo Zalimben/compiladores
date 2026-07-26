@@ -5,6 +5,8 @@ lenguajes y generación de código. Contiene ejercicios y proyectos desarrollado
 de manera incremental para la asignatura **Compiladores y Lenguajes de Bajo
 Nivel** de la FP-UNA.
 
+Inspirado en el libro [Writing a C Compiler](https://nostarch.com/writing-c-compiler)
+
 El objetivo principal es experimentar con las etapas de un compilador:
 
 ```text
