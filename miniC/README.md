@@ -1,15 +1,23 @@
-# MiniC — compiler driver (Entrega 1)
+# MiniC — compiler driver (Entrega 2)
 
-Esta versión implementa la primera entrega del driver de MiniC: valida un
-archivo fuente C y usa GCC como preprocesador para producir un archivo `.i`.
-Todavía no compila MiniC a ensamblador ni genera ejecutables.
+Esta versión implementa las dos primeras entregas del driver de MiniC:
+
+```text
+archivo.c → preprocesamiento → archivo.i
+archivo.c → preprocesamiento → compilador MiniC → archivo.s
+```
+
+GCC se utiliza como preprocesador y, temporalmente, como compilador simulado
+para producir ensamblador. Todavía no se implementan el lexer, el parser ni el
+generador de código propios de MiniC. El ensamblado, el enlace y la producción
+de un ejecutable corresponden a la Entrega 3.
 
 ## Requisitos
 
-- un sistema POSIX (Linux);
+- Linux u otro sistema POSIX;
 - un compilador compatible con C11;
 - GCC disponible en `PATH`;
-- `make`.
+- GNU Make.
 
 ## Compilación
 
@@ -17,8 +25,8 @@ Todavía no compila MiniC a ensamblador ni genera ejecutables.
 make
 ```
 
-El comando crea el ejecutable `minic` en este directorio. El proyecto se
-compila con `-Wall -Wextra -Wpedantic`.
+El comando crea `minic` en este directorio. El código se compila con
+`-Wall -Wextra -Wpedantic`.
 
 ## Uso
 
@@ -26,26 +34,68 @@ compila con `-Wall -Wextra -Wpedantic`.
 ./minic archivo.c
 ./minic -E archivo.c
 ./minic -E -P archivo.c
-./minic -E -P archivo.c -o salida.i
+./minic -S archivo.c
+./minic -S archivo.c -o salida.s
+./minic -v -S archivo.c
+./minic --keep-temp -S archivo.c
 ./minic --help
 ./minic --version
 ```
 
-En esta entrega, ejecutar el driver con o sin `-E` termina después del
-preprocesamiento. Si no se proporciona `-o`, `ruta/programa.c` genera
-`ruta/programa.i`. De forma predeterminada, GCC conserva sus marcadores de
-línea; la opción `-P` los elimina.
+En esta entrega:
 
-Ejemplo:
+- sin una opción de etapa, se conserva el comportamiento de Entrega 1 y se
+  produce un archivo `.i`;
+- `-E` detiene el pipeline después del preprocesamiento;
+- `-P` elimina los marcadores de línea del producto de `-E`;
+- `-S` ejecuta el mock del compilador mediante GCC y produce un archivo `.s`;
+- `-o` cambia el nombre del producto final;
+- `-v` muestra las etapas y los comandos ejecutados;
+- `--keep-temp` conserva el `.i` utilizado durante una compilación con `-S`.
 
-```bash
-./minic -E -P examples/return_2.c
+Sin `-o`, `programa.c` produce `programa.i` con `-E` y `programa.s` con `-S`.
+
+## Mock del compilador
+
+Para probar verticalmente el pipeline se utiliza este programa mínimo:
+
+```c
+int main(void) {
+    return 2;
+}
 ```
 
-Esto produce `examples/return_2.i` mediante una operación equivalente a:
+En esta entrega, `compileFile()` invoca una operación equivalente a:
 
 ```bash
-gcc -E -P examples/return_2.c -o examples/return_2.i
+gcc -S -x cpp-output programa.i -o programa.s
+```
+
+Por tratarse de un mock, GCC puede aceptar construcciones que todavía no forman
+parte de MiniC. Esto no define la gramática futura del lenguaje. Cuando estén
+disponibles, el lexer, el parser y el generador propios reemplazarán el interior
+de `compileFile()` sin modificar el driver.
+
+## Ejemplo
+
+```bash
+./minic -S examples/return_2.c
+```
+
+El resultado `examples/return_2.s` contiene ensamblador semejante a:
+
+```asm
+    .text
+    .globl main
+main:
+    movl $2, %eax
+    ret
+```
+
+Para observar también el archivo preprocesado y las etapas:
+
+```bash
+./minic -v --keep-temp -S examples/return_2.c
 ```
 
 ## Códigos de salida utilizados
@@ -56,8 +106,9 @@ gcc -E -P examples/return_2.c -o examples/return_2.i
 | 1 | uso incorrecto |
 | 2 | entrada inexistente o ilegible |
 | 3 | fallo del preprocesador |
+| 4 | fallo del compilador simulado |
 | 7 | no se pudo publicar la salida |
-| 8 | no se pudo administrar el temporal |
+| 8 | no se pudo administrar un temporal |
 | 9 | error interno |
 
 ## Pruebas
@@ -66,9 +117,10 @@ gcc -E -P examples/return_2.c -o examples/return_2.i
 make test
 ```
 
-Las pruebas cubren los casos positivos de preprocesamiento y los errores
-requeridos por Entrega 1. Los archivos de prueba se crean en un directorio
-temporal y se eliminan al finalizar.
+Las pruebas cubren preprocesamiento, generación de ensamblador, nombres de
+salida, modo detallado, conservación y limpieza de temporales, errores del
+preprocesador y errores informados por el mock. También se comprueba que el
+archivo `.s` pueda ser ensamblado por GCC.
 
 La separación de módulos y las decisiones principales están descritas en
 [`docs/arquitectura.md`](docs/arquitectura.md).

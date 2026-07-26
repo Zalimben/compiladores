@@ -2,16 +2,26 @@
 #define MINIC_OPTIONS_H
 
 typedef enum {
-    ACTION_PREPROCESS,
+    ACTION_RUN_PIPELINE,
     ACTION_SHOW_HELP,
     ACTION_SHOW_VERSION
 } DriverAction;
+
+typedef enum {
+    STAGE_PREPROCESS,
+    STAGE_COMPILE,
+    STAGE_ASSEMBLE,
+    STAGE_LINK
+} CompilationStage;
 
 typedef struct {
     const char *inputPath;
     char *outputPath;
     DriverAction action;
+    CompilationStage finalStage;
     int suppressLineMarkers;
+    int verbose;
+    int keepTemporaryFiles;
 } DriverOptions;
 
 void initializeOptions(DriverOptions *options);

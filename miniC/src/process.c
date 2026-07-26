@@ -36,7 +36,7 @@ ProcessResult runProcess(char *const arguments[]) {
 
     /* fork() retorna un valor negativo cuando no pudo crear el proceso hijo. */
     if (child < 0) {
-        diagnosticSystemError("no se pudo iniciar el preprocesador");
+        diagnosticSystemError("no se pudo iniciar el proceso externo");
         return result;
     }
 
@@ -66,7 +66,7 @@ ProcessResult runProcess(char *const arguments[]) {
      */
     while (waitpid(child, &status, 0) < 0) {
         if (errno != EINTR) {
-            diagnosticSystemError("no se pudo esperar al preprocesador");
+            diagnosticSystemError("no se pudo esperar al proceso externo");
             result.started = 0;
             return result;
         }

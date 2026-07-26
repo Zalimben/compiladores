@@ -15,7 +15,7 @@
 #include <string.h>
 
 /* Versión mostrada por la opción --version. */
-#define MINIC_VERSION "0.1.0"
+#define MINIC_VERSION "0.2.0"
 
 /*
  * Comprueba únicamente que la ruta termine en ".c".
@@ -29,13 +29,16 @@ static int hasCExtension(const char *path) {
 }
 
 /*
- * Construye el nombre predeterminado del archivo preprocesado.
+ * Construye el nombre predeterminado del producto solicitado.
  *
  * Como la extensión ".c" ya fue validada, basta sustituir su último carácter:
- * "programa.c" se convierte en "programa.i". La memoria pertenece al llamador
- * y debe liberarse con free().
+ * "programa.c" se convierte en "programa.i" o "programa.s". La memoria
+ * pertenece al llamador y debe liberarse con free().
  */
-static char *deriveOutputPath(const char *inputPath) {
+static char *deriveOutputPath(
+    const char *inputPath,
+    CompilationStage finalStage
+) {
     size_t length = strlen(inputPath);
     char *outputPath = malloc(length + 1);
 
@@ -45,7 +48,8 @@ static char *deriveOutputPath(const char *inputPath) {
     }
 
     memcpy(outputPath, inputPath, length + 1);
-    outputPath[length - 1] = 'i';
+    outputPath[length - 1] =
+        finalStage == STAGE_PREPROCESS ? 'i' : 's';
     return outputPath;
 }
 
@@ -74,22 +78,27 @@ static char *copyString(const char *value) {
 void initializeOptions(DriverOptions *options) {
     options->inputPath = NULL;
     options->outputPath = NULL;
-    options->action = ACTION_PREPROCESS;
+    options->action = ACTION_RUN_PIPELINE;
+    options->finalStage = STAGE_PREPROCESS;
     options->suppressLineMarkers = 0;
+    options->verbose = 0;
+    options->keepTemporaryFiles = 0;
 }
 
 /*
  * Analiza la línea de comandos de izquierda a derecha.
  *
  * Retorna un DriverExitCode: DRIVER_SUCCESS si las opciones son válidas o un
- * código distinto de cero después de mostrar un diagnóstico. En la Entrega 1
- * se admite un solo archivo fuente y las opciones -E, -P, -o, --help y
- * --version.
+ * código distinto de cero después de mostrar un diagnóstico. En la Entrega 2
+ * se admite un solo archivo fuente y las opciones -E, -S, -P, -o, -v,
+ * --keep-temp, --help y --version.
  */
 int parseArguments(int argc, char *argv[], DriverOptions *options) {
     int index;
-    int preprocessOptionSeen = 0;
+    const char *stageOption = NULL;
     int suppressMarkersOptionSeen = 0;
+    int verboseOptionSeen = 0;
+    int keepTemporaryOptionSeen = 0;
     const char *requestedOutput = NULL;
 
     /*
@@ -114,12 +123,30 @@ int parseArguments(int argc, char *argv[], DriverOptions *options) {
     for (index = 1; index < argc; ++index) {
         const char *argument = argv[index];
 
-        if (strcmp(argument, "-E") == 0) {
-            if (preprocessOptionSeen) {
-                diagnosticError("la opción '-E' se especificó más de una vez");
+        if (
+            strcmp(argument, "-E") == 0 ||
+            strcmp(argument, "-S") == 0
+        ) {
+            if (stageOption != NULL) {
+                if (strcmp(stageOption, argument) == 0) {
+                    diagnosticError(
+                        "la opción '%s' se especificó más de una vez",
+                        argument
+                    );
+                } else {
+                    diagnosticError(
+                        "las opciones '%s' y '%s' son incompatibles",
+                        stageOption,
+                        argument
+                    );
+                }
                 return DRIVER_USAGE_ERROR;
             }
-            preprocessOptionSeen = 1;
+            stageOption = argument;
+            options->finalStage =
+                strcmp(argument, "-E") == 0
+                    ? STAGE_PREPROCESS
+                    : STAGE_COMPILE;
         } else if (strcmp(argument, "-P") == 0) {
             if (suppressMarkersOptionSeen) {
                 diagnosticError("la opción '-P' se especificó más de una vez");
@@ -127,6 +154,22 @@ int parseArguments(int argc, char *argv[], DriverOptions *options) {
             }
             suppressMarkersOptionSeen = 1;
             options->suppressLineMarkers = 1;
+        } else if (strcmp(argument, "-v") == 0) {
+            if (verboseOptionSeen) {
+                diagnosticError("la opción '-v' se especificó más de una vez");
+                return DRIVER_USAGE_ERROR;
+            }
+            verboseOptionSeen = 1;
+            options->verbose = 1;
+        } else if (strcmp(argument, "--keep-temp") == 0) {
+            if (keepTemporaryOptionSeen) {
+                diagnosticError(
+                    "la opción '--keep-temp' se especificó más de una vez"
+                );
+                return DRIVER_USAGE_ERROR;
+            }
+            keepTemporaryOptionSeen = 1;
+            options->keepTemporaryFiles = 1;
         } else if (strcmp(argument, "-o") == 0) {
             /*
              * -o consume también el argumento siguiente. Incrementar index
@@ -182,7 +225,10 @@ int parseArguments(int argc, char *argv[], DriverOptions *options) {
             return DRIVER_INTERNAL_ERROR;
         }
     } else {
-        options->outputPath = deriveOutputPath(options->inputPath);
+        options->outputPath = deriveOutputPath(
+            options->inputPath,
+            options->finalStage
+        );
         if (options->outputPath == NULL) {
             return DRIVER_INTERNAL_ERROR;
         }
@@ -197,25 +243,28 @@ void destroyOptions(DriverOptions *options) {
     options->outputPath = NULL;
 }
 
-/* Muestra la interfaz disponible en la Entrega 1. */
+/* Muestra la interfaz disponible hasta la Entrega 2. */
 void printHelp(void) {
     puts(
         "Uso: minic [opciones] archivo.c\n"
         "\n"
-        "Driver de MiniC — Entrega 1 (preprocesamiento).\n"
+        "Driver de MiniC — Entrega 2.\n"
         "\n"
         "Opciones:\n"
         "  -E              Ejecuta solamente el preprocesamiento\n"
+        "  -S              Genera ensamblador y se detiene\n"
         "  -P              Elimina los marcadores de línea del resultado\n"
         "  -o archivo      Escribe el resultado en archivo\n"
+        "  -v              Muestra las etapas y comandos ejecutados\n"
+        "  --keep-temp     Conserva el archivo preprocesado con -S\n"
         "  --help          Muestra esta ayuda\n"
         "  --version       Muestra la versión\n"
         "\n"
-        "Sin -o, la salida se guarda junto a la entrada con extensión .i."
+        "Sin -o, la salida usa la extensión .i para -E y .s para -S."
     );
 }
 
 /* Muestra una versión breve, apropiada para scripts y reportes de errores. */
 void printVersion(void) {
-    puts("minic " MINIC_VERSION " (Entrega 1)");
+    puts("minic " MINIC_VERSION " (Entrega 2)");
 }

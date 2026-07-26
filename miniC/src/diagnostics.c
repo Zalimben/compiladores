@@ -41,6 +41,44 @@ void diagnosticError(const char *format, ...) {
 }
 
 /*
+ * Muestra información del modo detallado.
+ *
+ * También se utiliza stderr, ya que la salida informativa no forma parte del
+ * producto que el usuario solicitó al compilador.
+ */
+void diagnosticInfo(const char *format, ...) {
+    va_list arguments;
+
+    fputs("minic: info: ", stderr);
+    va_start(arguments, format);
+    vfprintf(stderr, format, arguments);
+    va_end(arguments);
+    fputc('\n', stderr);
+}
+
+/*
+ * Presenta un error asociado a una posición del programa fuente.
+ *
+ * El formato archivo:línea:columna es reconocido por editores e IDE, que
+ * pueden convertir el diagnóstico en un enlace a la ubicación del error.
+ */
+void diagnosticSourceError(
+    const char *path,
+    size_t line,
+    size_t column,
+    const char *format,
+    ...
+) {
+    va_list arguments;
+
+    fprintf(stderr, "%s:%zu:%zu: error: ", path, line, column);
+    va_start(arguments, format);
+    vfprintf(stderr, format, arguments);
+    va_end(arguments);
+    fputc('\n', stderr);
+}
+
+/*
  * Muestra un error informado por el sistema operativo.
  *
  * Muchas funciones POSIX indican la causa de un fallo mediante errno. Se debe

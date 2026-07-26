@@ -1,3 +1,4 @@
 /build/
 /minic
 /examples/*.i
+/examples/*.s
