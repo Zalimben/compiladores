@@ -102,6 +102,7 @@ void initializeOptions(DriverOptions *options) {
     options->outputPath = NULL;
     options->action = ACTION_RUN_PIPELINE;
     options->finalStage = STAGE_LINK;
+    options->compilerMode = COMPILER_MODE_EMIT_ASSEMBLY;
     options->suppressLineMarkers = 0;
     options->verbose = 0;
     options->keepTemporaryFiles = 0;
@@ -113,11 +114,12 @@ void initializeOptions(DriverOptions *options) {
  * Retorna un DriverExitCode: DRIVER_SUCCESS si las opciones son válidas o un
  * código distinto de cero después de mostrar un diagnóstico. En la Entrega 3
  * se admite un solo archivo fuente y las opciones -E, -S, -c, -P, -o, -v,
- * --keep-temp, --help y --version.
+ * --lex, --parse, --codegen, --keep-temp, --help y --version.
  */
 int parseArguments(int argc, char *argv[], DriverOptions *options) {
     int index;
     const char *stageOption = NULL;
+    const char *internalOption = NULL;
     int suppressMarkersOptionSeen = 0;
     int verboseOptionSeen = 0;
     int keepTemporaryOptionSeen = 0;
@@ -150,6 +152,14 @@ int parseArguments(int argc, char *argv[], DriverOptions *options) {
             strcmp(argument, "-S") == 0 ||
             strcmp(argument, "-c") == 0
         ) {
+            if (internalOption != NULL) {
+                diagnosticError(
+                    "las opciones '%s' y '%s' son incompatibles",
+                    internalOption,
+                    argument
+                );
+                return DRIVER_USAGE_ERROR;
+            }
             if (stageOption != NULL) {
                 if (strcmp(stageOption, argument) == 0) {
                     diagnosticError(
@@ -172,6 +182,43 @@ int parseArguments(int argc, char *argv[], DriverOptions *options) {
                 options->finalStage = STAGE_COMPILE;
             } else {
                 options->finalStage = STAGE_ASSEMBLE;
+            }
+        } else if (
+            strcmp(argument, "--lex") == 0 ||
+            strcmp(argument, "--parse") == 0 ||
+            strcmp(argument, "--codegen") == 0
+        ) {
+            if (stageOption != NULL) {
+                diagnosticError(
+                    "las opciones '%s' y '%s' son incompatibles",
+                    stageOption,
+                    argument
+                );
+                return DRIVER_USAGE_ERROR;
+            }
+            if (internalOption != NULL) {
+                if (strcmp(internalOption, argument) == 0) {
+                    diagnosticError(
+                        "la opción '%s' se especificó más de una vez",
+                        argument
+                    );
+                } else {
+                    diagnosticError(
+                        "las opciones '%s' y '%s' son incompatibles",
+                        internalOption,
+                        argument
+                    );
+                }
+                return DRIVER_USAGE_ERROR;
+            }
+
+            internalOption = argument;
+            if (strcmp(argument, "--lex") == 0) {
+                options->compilerMode = COMPILER_MODE_LEX_ONLY;
+            } else if (strcmp(argument, "--parse") == 0) {
+                options->compilerMode = COMPILER_MODE_PARSE_ONLY;
+            } else {
+                options->compilerMode = COMPILER_MODE_CODEGEN_ONLY;
             }
         } else if (strcmp(argument, "-P") == 0) {
             if (suppressMarkersOptionSeen) {
@@ -239,12 +286,22 @@ int parseArguments(int argc, char *argv[], DriverOptions *options) {
         return DRIVER_USAGE_ERROR;
     }
 
+    if (internalOption != NULL && requestedOutput != NULL) {
+        diagnosticError(
+            "la opción '-o' no es compatible con '%s'",
+            internalOption
+        );
+        return DRIVER_USAGE_ERROR;
+    }
+
     /*
-     * outputPath siempre se almacena en memoria dinámica, tanto para -o como
-     * para el nombre predeterminado. Así destroyOptions() tiene una única
-     * regla de propiedad y no necesita distinguir ambos casos.
+     * Los modos internos no publican un producto y dejan outputPath en NULL.
+     * En el pipeline normal, outputPath siempre usa memoria dinámica; así
+     * destroyOptions() mantiene una única regla de propiedad.
      */
-    if (requestedOutput != NULL) {
+    if (internalOption != NULL) {
+        options->outputPath = NULL;
+    } else if (requestedOutput != NULL) {
         options->outputPath = copyString(requestedOutput);
         if (options->outputPath == NULL) {
             diagnosticError("no hay memoria suficiente para guardar la salida");
@@ -283,6 +340,9 @@ void printHelp(void) {
         "  -P              Elimina los marcadores de línea del resultado\n"
         "  -o archivo      Escribe el resultado en archivo\n"
         "  -v              Muestra las etapas y comandos ejecutados\n"
+        "  --lex           Ejecuta el mock del lexer y se detiene\n"
+        "  --parse         Ejecuta los mocks de lexer y parser y se detiene\n"
+        "  --codegen       Ejecuta el mock de generación y se detiene\n"
         "  --keep-temp     Conserva los archivos intermedios\n"
         "  --help          Muestra esta ayuda\n"
         "  --version       Muestra la versión\n"

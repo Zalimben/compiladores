@@ -75,6 +75,43 @@ CompilationResult compileFile(
 Por ello, reemplazar el mock no afectará las etapas de preprocesamiento,
 ensamblado, enlace ni la interfaz de línea de comandos.
 
+## Puntos de detención internos
+
+`CompilerMode` comunica a `compiler.c` el punto solicitado:
+
+```c
+typedef enum {
+    COMPILER_MODE_EMIT_ASSEMBLY,
+    COMPILER_MODE_LEX_ONLY,
+    COMPILER_MODE_PARSE_ONLY,
+    COMPILER_MODE_CODEGEN_ONLY
+} CompilerMode;
+```
+
+En la implementación futura:
+
+```text
+COMPILER_MODE_LEX_ONLY
+    lexer → detener
+
+COMPILER_MODE_PARSE_ONLY
+    lexer → parser → detener
+
+COMPILER_MODE_CODEGEN_ONLY
+    lexer → parser → semántica → representación de ensamblador → detener
+
+COMPILER_MODE_EMIT_ASSEMBLY
+    fases anteriores → escribir archivo .s
+```
+
+Actualmente, los dos primeros modos usan `gcc -fsyntax-only`. El modo codegen
+genera ensamblador con GCC en un temporal que el driver elimina. Esta
+aproximación permite verificar opciones, errores y detención del pipeline sin
+adelantar la implementación del compilador.
+
+Los modos internos no aceptan `-o`. `--keep-temp` conserva el `.i`, pero ningún
+modo publica `.s`, `.o` ni ejecutable.
+
 ## Gestión de productos
 
 Cada etapa escribe inicialmente en un archivo creado con `mkstemp()`. El

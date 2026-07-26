@@ -349,6 +349,87 @@ static int conflictsWithKeptIntermediate(
 }
 
 /*
+ * Ejecuta uno de los puntos de detención internos solicitados con --lex,
+ * --parse o --codegen. El resultado que GCC usa para simular la fase se guarda
+ * siempre en un temporal y se descarta: estos modos validan una fase, pero no
+ * publican ensamblador, objeto ni ejecutable.
+ */
+static int runCompilerInspection(const DriverOptions *options) {
+    char *preprocessedProduct = NULL;
+    char *assemblyProduct = NULL;
+    char *preprocessedTemporary = NULL;
+    char *compilerTemporary = NULL;
+    const char *compilerInput;
+    CompilationResult compilationResult;
+    int result = DRIVER_INTERNAL_ERROR;
+    int cleanupSucceeded = 1;
+
+    preprocessedProduct = replaceExtension(options->inputPath, ".i");
+    assemblyProduct = replaceExtension(options->inputPath, ".s");
+    if (preprocessedProduct == NULL || assemblyProduct == NULL) {
+        goto cleanup;
+    }
+
+    preprocessedTemporary = createTemporaryPath(preprocessedProduct);
+    if (preprocessedTemporary == NULL) {
+        result = DRIVER_TEMPORARY_ERROR;
+        goto cleanup;
+    }
+
+    result = preprocess(
+        options->inputPath,
+        preprocessedTemporary,
+        1,
+        options->verbose
+    );
+    if (result != DRIVER_SUCCESS) {
+        goto cleanup;
+    }
+
+    compilerInput = preprocessedTemporary;
+    if (options->keepTemporaryFiles) {
+        result = publishTemporary(
+            &preprocessedTemporary,
+            preprocessedProduct,
+            DRIVER_TEMPORARY_ERROR
+        );
+        if (result != DRIVER_SUCCESS) {
+            goto cleanup;
+        }
+        compilerInput = preprocessedProduct;
+    }
+
+    compilerTemporary = createTemporaryPath(assemblyProduct);
+    if (compilerTemporary == NULL) {
+        result = DRIVER_TEMPORARY_ERROR;
+        goto cleanup;
+    }
+
+    setCompilerVerbose(options->verbose);
+    setCompilerMode(options->compilerMode);
+    compilationResult = compileFile(compilerInput, compilerTemporary);
+    result = compilationResult.success
+        ? DRIVER_SUCCESS
+        : DRIVER_COMPILER_ERROR;
+
+cleanup:
+    if (!discardTemporary(&compilerTemporary)) {
+        cleanupSucceeded = 0;
+    }
+    if (!discardTemporary(&preprocessedTemporary)) {
+        cleanupSucceeded = 0;
+    }
+
+    free(assemblyProduct);
+    free(preprocessedProduct);
+
+    if (result == DRIVER_SUCCESS && !cleanupSucceeded) {
+        return DRIVER_TEMPORARY_ERROR;
+    }
+    return result;
+}
+
+/*
  * Ejecuta desde preprocesamiento hasta la etapa indicada por finalStage.
  *
  * Los punteros *Temporary identifican exclusivamente archivos que deben
@@ -455,6 +536,7 @@ static int runNativePipeline(const DriverOptions *options) {
      * ensamblador. El resto del pipeline permanecerá sin cambios.
      */
     setCompilerVerbose(options->verbose);
+    setCompilerMode(COMPILER_MODE_EMIT_ASSEMBLY);
     compilationResult = compileFile(compilationInput, assemblyTemporary);
     if (!compilationResult.success) {
         result = DRIVER_COMPILER_ERROR;
@@ -585,6 +667,10 @@ int runDriver(const DriverOptions *options) {
     validationResult = validateInput(options->inputPath);
     if (validationResult != DRIVER_SUCCESS) {
         return validationResult;
+    }
+
+    if (options->compilerMode != COMPILER_MODE_EMIT_ASSEMBLY) {
+        return runCompilerInspection(options);
     }
 
     if (strcmp(options->inputPath, options->outputPath) == 0) {

@@ -35,6 +35,9 @@ El comando crea `minic` en este directorio. El código se compila con
 ./minic -E -P programa.c
 ./minic -S programa.c
 ./minic -c programa.c
+./minic --lex programa.c
+./minic --parse programa.c
+./minic --codegen programa.c
 ./minic programa.c -o aplicacion
 ./minic --keep-temp programa.c
 ./minic -v programa.c
@@ -54,6 +57,27 @@ El comando crea `minic` en este directorio. El código se compila con
 `-o archivo` cambia el nombre del producto final de cualquiera de estas
 etapas. `-P` elimina los marcadores de línea del producto solicitado con `-E`;
 las compilaciones posteriores los eliminan internamente.
+
+### Modos internos
+
+Los siguientes modos preparan la integración del futuro compilador:
+
+| Opción | Punto de detención futuro | Mock actual |
+|---|---|---|
+| `--lex` | Después del lexer, antes del parser | `gcc -fsyntax-only` |
+| `--parse` | Después del lexer y parser | `gcc -fsyntax-only` |
+| `--codegen` | Después de generar la representación de ensamblador, antes de emitirla | `gcc -S` hacia un temporal descartado |
+
+GCC no permite detenerse exactamente en las mismas fronteras internas. Por
+eso, `--lex` y `--parse` tienen el mismo comportamiento temporal y pueden
+detectar errores de fases posteriores a la que representan.
+
+Estos modos no generan un producto visible y no aceptan `-o`. Con
+`--keep-temp` se conserva únicamente el `.i` entregado al mock:
+
+```bash
+./minic --keep-temp --parse programa.c
+```
 
 ## Ejemplo completo
 
@@ -153,10 +177,10 @@ aceptar construcciones que todavía no definen la futura gramática de MiniC.
 make test
 ```
 
-La suite cubre las cuatro etapas, productos predeterminados y personalizados,
-limpieza y conservación de intermedios, rutas con espacios, errores de uso,
-fallos del preprocesador, diagnósticos del mock y el valor retornado por el
-ejecutable.
+La suite cubre las cuatro etapas, los tres modos internos simulados, productos
+predeterminados y personalizados, limpieza y conservación de intermedios,
+rutas con espacios, errores de uso, fallos por etapa, diagnósticos del mock y
+el valor retornado por el ejecutable.
 
 Las decisiones técnicas están descritas en
 [`docs/arquitectura.md`](docs/arquitectura.md).

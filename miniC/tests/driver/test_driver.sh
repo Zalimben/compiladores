@@ -172,6 +172,57 @@ else
     fail "GCC diagnostica el error del mock"
 fi
 
+# Modos internos simulados para el futuro compilador.
+cp "$TEST_ROOT/return_2.c" "$TEST_ROOT/modos_internos.c"
+rm -f \
+    "$TEST_ROOT/modos_internos.i" \
+    "$TEST_ROOT/modos_internos.s" \
+    "$TEST_ROOT/modos_internos.o" \
+    "$TEST_ROOT/modos_internos"
+expect_status 0 "--lex ejecuta el mock y se detiene" \
+    "$MINIC" --lex "$TEST_ROOT/modos_internos.c"
+expect_status 0 "--parse ejecuta el mock y se detiene" \
+    "$MINIC" --parse "$TEST_ROOT/modos_internos.c"
+expect_status 0 "--codegen ejecuta el mock y se detiene" \
+    "$MINIC" --codegen "$TEST_ROOT/modos_internos.c"
+if [ ! -e "$TEST_ROOT/modos_internos.i" ] &&
+   [ ! -e "$TEST_ROOT/modos_internos.s" ] &&
+   [ ! -e "$TEST_ROOT/modos_internos.o" ] &&
+   [ ! -e "$TEST_ROOT/modos_internos" ]; then
+    pass "los modos internos no publican productos"
+else
+    fail "los modos internos no publican productos"
+fi
+
+expect_status 0 "--keep-temp conserva el .i de un modo interno" \
+    "$MINIC" --keep-temp --parse "$TEST_ROOT/modos_internos.c"
+if [ -f "$TEST_ROOT/modos_internos.i" ] &&
+   [ ! -e "$TEST_ROOT/modos_internos.s" ]; then
+    pass "--keep-temp solo conserva la entrada preprocesada"
+else
+    fail "--keep-temp solo conserva la entrada preprocesada"
+fi
+
+expect_status 0 "-v describe el mock de --codegen" \
+    "$MINIC" -v --codegen "$TEST_ROOT/modos_internos.c"
+if grep -q "preprocesamiento:" "$TEST_ROOT/stderr" &&
+   grep -q "mock de generación de código:" "$TEST_ROOT/stderr" &&
+   [ "$(grep -c "^minic: comando:" "$TEST_ROOT/stderr")" -eq 2 ]; then
+    pass "-v muestra preprocesamiento y modo interno"
+else
+    fail "-v muestra preprocesamiento y modo interno"
+fi
+
+expect_status 4 "--parse propaga un error del mock" \
+    "$MINIC" --parse "$TEST_ROOT/sin_punto_y_coma.c"
+expect_status 1 "rechaza dos modos internos simultáneos" \
+    "$MINIC" --lex --parse "$TEST_ROOT/modos_internos.c"
+expect_status 1 "rechaza un modo interno junto con -S" \
+    "$MINIC" --lex -S "$TEST_ROOT/modos_internos.c"
+expect_status 1 "rechaza -o en los modos internos" \
+    "$MINIC" --codegen "$TEST_ROOT/modos_internos.c" \
+    -o "$TEST_ROOT/no_permitido.s"
+
 # Casos de integración de la Entrega 3.
 rm -f \
     "$TEST_ROOT/return_2.i" \

@@ -1,6 +1,8 @@
 #ifndef MINIC_OPTIONS_H
 #define MINIC_OPTIONS_H
 
+#include "compiler.h"
+
 typedef enum {
     ACTION_RUN_PIPELINE,
     ACTION_SHOW_HELP,
@@ -19,6 +21,7 @@ typedef struct {
     char *outputPath;
     DriverAction action;
     CompilationStage finalStage;
+    CompilerMode compilerMode;
     int suppressLineMarkers;
     int verbose;
     int keepTemporaryFiles;

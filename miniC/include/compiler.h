@@ -14,7 +14,15 @@ typedef struct {
     int errorCount;
 } CompilationResult;
 
+typedef enum {
+    COMPILER_MODE_EMIT_ASSEMBLY,
+    COMPILER_MODE_LEX_ONLY,
+    COMPILER_MODE_PARSE_ONLY,
+    COMPILER_MODE_CODEGEN_ONLY
+} CompilerMode;
+
 void setCompilerVerbose(int verbose);
+void setCompilerMode(CompilerMode mode);
 
 CompilationResult compileFile(
     const char *preprocessedPath,
