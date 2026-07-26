@@ -23,7 +23,7 @@ Código fuente
 
 | Directorio | Descripción |
 |---|---|
-| [`miniC/`](miniC/) | Driver incremental para MiniC; la Entrega 2 usa un mock basado en GCC para producir ensamblador x86-64. |
+| [`miniC/`](miniC/) | Compiler driver completo: preprocesa, genera ensamblador mediante un mock de GCC, ensambla, enlaza y produce ejecutables nativos. |
 | [`miniPascal/`](miniPascal/) | Analizador léxico y tabla de símbolos para un lenguaje con sintaxis tipo Pascal. |
 | [`practica/`](practica/) | Ejemplo mínimo que relaciona una función en C con el ensamblador x86-64 generado. |
 
@@ -51,11 +51,12 @@ Desde la raíz del repositorio:
 
 ```bash
 make -C miniC
-./miniC/minic -S miniC/examples/return_2.c
+./miniC/minic miniC/examples/return_2.c
+./miniC/examples/return_2
 ```
 
-El comando genera el archivo ensamblador
-`miniC/examples/return_2.s`. Para ejecutar sus pruebas:
+El driver genera el ejecutable `miniC/examples/return_2`; el programa finaliza
+con código `2`. Para ejecutar las pruebas:
 
 ```bash
 make -C miniC test

@@ -1,9 +1,6 @@
 /*
  * Punto de integración con el futuro compilador MiniC.
  *
- * Entrega 2 todavía no implementa lexer, parser ni generación propia de
- * código. compileFile() funciona como un mock: delega temporalmente en GCC la
- * transformación del archivo preprocesado (.i) a ensamblador (.s).
  *
  * Cuando el compilador real esté disponible, se reemplazará únicamente el
  * cuerpo de este módulo por una secuencia semejante a:
@@ -54,6 +51,22 @@ CompilationResult compileFile(
     const char *preprocessedPath,
     const char *assemblyPath
 ) {
+    /*
+     * PUNTO EXACTO PARA INCORPORAR EL COMPILADOR REAL:
+     *
+     * Este bloque basado en GCC deberá reemplazarse por llamadas a módulos
+     * propios. Una organización futura posible es:
+     *
+     *     Lexer lexer = lexerCreate(preprocessedPath);
+     *     TokenStream tokens = lexerScan(&lexer);
+     *     Parser parser = parserCreate(&tokens);
+     *     AstProgram *program = parserParseProgram(&parser);
+     *     semanticValidate(program);
+     *     generateAssembly(program, assemblyPath);
+     *
+     * Esas fases deben permanecer en módulos separados. No deben añadirse a
+     * driver.c: el driver solo coordina el pipeline y consulta este resultado.
+     */
     CompilationResult result = {0, 1};
     ProcessResult processResult;
 

@@ -1,20 +1,19 @@
-# MiniC — compiler driver (Entrega 2)
+# MiniC — compiler driver (Entrega 3)
 
-Esta versión implementa las dos primeras entregas del driver de MiniC:
+Esta versión completa el compiler driver y coordina el pipeline nativo:
 
 ```text
-archivo.c → preprocesamiento → archivo.i
-archivo.c → preprocesamiento → compilador MiniC → archivo.s
+archivo.c → archivo.i → archivo.s → archivo.o → ejecutable
 ```
 
-GCC se utiliza como preprocesador y, temporalmente, como compilador simulado
-para producir ensamblador. Todavía no se implementan el lexer, el parser ni el
-generador de código propios de MiniC. El ensamblado, el enlace y la producción
-de un ejecutable corresponden a la Entrega 3.
+GCC se utiliza para preprocesar, ensamblar y enlazar. También se utiliza
+temporalmente como mock de `compileFile()` para transformar `.i` en `.s`.
+Todavía no se implementan el lexer, el parser ni el generador de código propios
+de MiniC.
 
 ## Requisitos
 
-- Linux u otro sistema POSIX;
+- Linux x86-64 u otro sistema POSIX compatible;
 - un compilador compatible con C11;
 - GCC disponible en `PATH`;
 - GNU Make.
@@ -31,74 +30,109 @@ El comando crea `minic` en este directorio. El código se compila con
 ## Uso
 
 ```bash
-./minic archivo.c
-./minic -E archivo.c
-./minic -E -P archivo.c
-./minic -S archivo.c
-./minic -S archivo.c -o salida.s
-./minic -v -S archivo.c
-./minic --keep-temp -S archivo.c
+./minic programa.c
+./minic -E programa.c
+./minic -E -P programa.c
+./minic -S programa.c
+./minic -c programa.c
+./minic programa.c -o aplicacion
+./minic --keep-temp programa.c
+./minic -v programa.c
 ./minic --help
 ./minic --version
 ```
 
-En esta entrega:
+### Etapas
 
-- sin una opción de etapa, se conserva el comportamiento de Entrega 1 y se
-  produce un archivo `.i`;
-- `-E` detiene el pipeline después del preprocesamiento;
-- `-P` elimina los marcadores de línea del producto de `-E`;
-- `-S` ejecuta el mock del compilador mediante GCC y produce un archivo `.s`;
-- `-o` cambia el nombre del producto final;
-- `-v` muestra las etapas y los comandos ejecutados;
-- `--keep-temp` conserva el `.i` utilizado durante una compilación con `-S`.
+| Opción | Última etapa | Producto predeterminado |
+|---|---|---|
+| `-E` | Preprocesamiento | `programa.i` |
+| `-S` | Compilación simulada | `programa.s` |
+| `-c` | Ensamblado | `programa.o` |
+| Sin opción | Enlace | `programa` |
 
-Sin `-o`, `programa.c` produce `programa.i` con `-E` y `programa.s` con `-S`.
+`-o archivo` cambia el nombre del producto final de cualquiera de estas
+etapas. `-P` elimina los marcadores de línea del producto solicitado con `-E`;
+las compilaciones posteriores los eliminan internamente.
 
-## Mock del compilador
+## Ejemplo completo
 
-Para probar verticalmente el pipeline se utiliza este programa mínimo:
-
-```c
-int main(void) {
-    return 2;
-}
+```bash
+./minic examples/return_2.c
+./examples/return_2
+echo $?
 ```
 
-En esta entrega, `compileFile()` invoca una operación equivalente a:
+Resultado esperado:
+
+```text
+2
+```
+
+Para ver los cuatro comandos ejecutados:
+
+```bash
+./minic -v examples/return_2.c
+```
+
+## Archivos temporales
+
+Sin `--keep-temp`, una compilación completa conserva únicamente:
+
+```text
+return_2.c
+return_2
+```
+
+Con:
+
+```bash
+./minic --keep-temp examples/return_2.c
+```
+
+se conservan:
+
+```text
+return_2.c
+return_2.i
+return_2.s
+return_2.o
+return_2
+```
+
+Los intermedios se crean con nombres únicos y los productos finales se publican
+mediante `rename()`. Si una etapa falla, las etapas posteriores no se ejecutan,
+los temporales no solicitados se eliminan y una salida anterior no se reemplaza
+por un archivo parcial.
+
+## Mock del compilador MiniC
+
+La interfaz estable es:
+
+```c
+CompilationResult compileFile(
+    const char *preprocessedPath,
+    const char *assemblyPath
+);
+```
+
+En esta entrega ejecuta una operación equivalente a:
 
 ```bash
 gcc -S -x cpp-output programa.i -o programa.s
 ```
 
-Por tratarse de un mock, GCC puede aceptar construcciones que todavía no forman
-parte de MiniC. Esto no define la gramática futura del lenguaje. Cuando estén
-disponibles, el lexer, el parser y el generador propios reemplazarán el interior
-de `compileFile()` sin modificar el driver.
+El punto exacto de sustitución está documentado en `src/compiler.c`. Cuando se
+implemente el compilador real, el interior de `compileFile()` deberá ejecutar:
 
-## Ejemplo
-
-```bash
-./minic -S examples/return_2.c
+```text
+lexer → parser → análisis semántico → generación de ensamblador
 ```
 
-El resultado `examples/return_2.s` contiene ensamblador semejante a:
+Estas fases no deben incorporarse al driver. Por tratarse de un mock, GCC puede
+aceptar construcciones que todavía no definen la futura gramática de MiniC.
 
-```asm
-    .text
-    .globl main
-main:
-    movl $2, %eax
-    ret
-```
-
-Para observar también el archivo preprocesado y las etapas:
-
-```bash
-./minic -v --keep-temp -S examples/return_2.c
-```
-
-## Códigos de salida utilizados
+## Códigos de salida
 
 | Código | Significado |
 |---:|---|
@@ -107,8 +141,10 @@ Para observar también el archivo preprocesado y las etapas:
 | 2 | entrada inexistente o ilegible |
 | 3 | fallo del preprocesador |
 | 4 | fallo del compilador simulado |
+| 5 | fallo del ensamblador |
+| 6 | fallo del enlazador |
 | 7 | no se pudo publicar la salida |
-| 8 | no se pudo administrar un temporal |
+| 8 | error al administrar temporales |
 | 9 | error interno |
 
 ## Pruebas
@@ -117,10 +153,10 @@ Para observar también el archivo preprocesado y las etapas:
 make test
 ```
 
-Las pruebas cubren preprocesamiento, generación de ensamblador, nombres de
-salida, modo detallado, conservación y limpieza de temporales, errores del
-preprocesador y errores informados por el mock. También se comprueba que el
-archivo `.s` pueda ser ensamblado por GCC.
+La suite cubre las cuatro etapas, productos predeterminados y personalizados,
+limpieza y conservación de intermedios, rutas con espacios, errores de uso,
+fallos del preprocesador, diagnósticos del mock y el valor retornado por el
+ejecutable.
 
-La separación de módulos y las decisiones principales están descritas en
+Las decisiones técnicas están descritas en
 [`docs/arquitectura.md`](docs/arquitectura.md).

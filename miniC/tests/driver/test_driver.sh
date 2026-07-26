@@ -46,7 +46,8 @@ EOF
 expect_status 0 "muestra la ayuda" "$MINIC" --help
 expect_status 0 "muestra la versión" "$MINIC" --version
 
-expect_status 0 "preprocesa sin -E" "$MINIC" "$TEST_ROOT/return_2.c"
+expect_status 0 "preprocesa con -E" \
+    "$MINIC" -E "$TEST_ROOT/return_2.c"
 if [ -f "$TEST_ROOT/return_2.i" ] &&
    grep -q "return 2;" "$TEST_ROOT/return_2.i"; then
     pass "genera la salida .i predeterminada"
@@ -55,7 +56,8 @@ else
 fi
 
 rm -f "$TEST_ROOT/return_2.i"
-expect_status 0 "preprocesa con -E" "$MINIC" -E "$TEST_ROOT/return_2.c"
+expect_status 0 "-E conserva los marcadores por defecto" \
+    "$MINIC" -E "$TEST_ROOT/return_2.c"
 if [ -f "$TEST_ROOT/return_2.i" ] &&
    grep -q '^# ' "$TEST_ROOT/return_2.i"; then
     pass "sin -P conserva los marcadores de línea"
@@ -73,7 +75,7 @@ else
 fi
 
 expect_status 0 "acepta -o en Entrega 1" \
-    "$MINIC" "$TEST_ROOT/return_2.c" -o "$TEST_ROOT/personalizado.i"
+    "$MINIC" -E "$TEST_ROOT/return_2.c" -o "$TEST_ROOT/personalizado.i"
 if [ -f "$TEST_ROOT/personalizado.i" ]; then
     pass "-o cambia el archivo de salida"
 else
@@ -170,6 +172,182 @@ else
     fail "GCC diagnostica el error del mock"
 fi
 
+# Casos de integración de la Entrega 3.
+rm -f \
+    "$TEST_ROOT/return_2.i" \
+    "$TEST_ROOT/return_2.s" \
+    "$TEST_ROOT/return_2.o" \
+    "$TEST_ROOT/return_2"
+expect_status 0 "-c genera un archivo objeto" \
+    "$MINIC" -c "$TEST_ROOT/return_2.c"
+if [ -f "$TEST_ROOT/return_2.o" ]; then
+    pass "-c conserva el producto .o"
+else
+    fail "-c conserva el producto .o"
+fi
+if [ ! -e "$TEST_ROOT/return_2.i" ] &&
+   [ ! -e "$TEST_ROOT/return_2.s" ] &&
+   [ ! -e "$TEST_ROOT/return_2" ]; then
+    pass "-c elimina intermedios y no enlaza"
+else
+    fail "-c elimina intermedios y no enlaza"
+fi
+
+expect_status 0 "-c acepta una salida personalizada" \
+    "$MINIC" -c "$TEST_ROOT/return_2.c" \
+    -o "$TEST_ROOT/personalizado.o"
+if [ -f "$TEST_ROOT/personalizado.o" ]; then
+    pass "-o cambia el nombre del archivo objeto"
+else
+    fail "-o cambia el nombre del archivo objeto"
+fi
+
+rm -f \
+    "$TEST_ROOT/return_2.i" \
+    "$TEST_ROOT/return_2.s" \
+    "$TEST_ROOT/return_2.o" \
+    "$TEST_ROOT/return_2"
+expect_status 0 "sin opción de etapa genera un ejecutable" \
+    "$MINIC" "$TEST_ROOT/return_2.c"
+if [ -x "$TEST_ROOT/return_2" ]; then
+    pass "genera el ejecutable con el nombre predeterminado"
+else
+    fail "genera el ejecutable con el nombre predeterminado"
+fi
+
+"$TEST_ROOT/return_2" >"$TEST_ROOT/stdout" 2>"$TEST_ROOT/stderr"
+program_status=$?
+if [ "$program_status" -eq 2 ]; then
+    pass "el ejecutable retorna el valor esperado"
+else
+    fail "el ejecutable retorna 2 (se obtuvo $program_status)"
+fi
+
+if [ ! -e "$TEST_ROOT/return_2.i" ] &&
+   [ ! -e "$TEST_ROOT/return_2.s" ] &&
+   [ ! -e "$TEST_ROOT/return_2.o" ]; then
+    pass "el enlace completo elimina todos los intermedios"
+else
+    fail "el enlace completo elimina todos los intermedios"
+fi
+
+expect_status 0 "el enlace acepta una salida personalizada" \
+    "$MINIC" "$TEST_ROOT/return_2.c" -o "$TEST_ROOT/aplicacion"
+if [ -x "$TEST_ROOT/aplicacion" ]; then
+    pass "-o cambia el nombre del ejecutable"
+else
+    fail "-o cambia el nombre del ejecutable"
+fi
+
+rm -f \
+    "$TEST_ROOT/return_2.i" \
+    "$TEST_ROOT/return_2.s" \
+    "$TEST_ROOT/return_2.o"
+expect_status 0 "--keep-temp conserva todos los intermedios" \
+    "$MINIC" --keep-temp "$TEST_ROOT/return_2.c" \
+    -o "$TEST_ROOT/con_intermedios"
+if [ -f "$TEST_ROOT/return_2.i" ] &&
+   [ -f "$TEST_ROOT/return_2.s" ] &&
+   [ -f "$TEST_ROOT/return_2.o" ] &&
+   [ -x "$TEST_ROOT/con_intermedios" ]; then
+    pass "--keep-temp conserva .i, .s y .o"
+else
+    fail "--keep-temp conserva .i, .s y .o"
+fi
+
+cat >"$TEST_ROOT/detallado.c" <<'EOF'
+int main(void) {
+    return 2;
+}
+EOF
+expect_status 0 "-v muestra el pipeline completo" \
+    "$MINIC" -v "$TEST_ROOT/detallado.c"
+if grep -q "preprocesamiento:" "$TEST_ROOT/stderr" &&
+   grep -q "compilador simulado con GCC:" "$TEST_ROOT/stderr" &&
+   grep -q "ensamblado:" "$TEST_ROOT/stderr" &&
+   grep -q "enlace:" "$TEST_ROOT/stderr" &&
+   [ "$(grep -c "^minic: comando:" "$TEST_ROOT/stderr")" -eq 4 ]; then
+    pass "-v informa las cuatro etapas y comandos"
+else
+    fail "-v informa las cuatro etapas y comandos"
+fi
+
+rm -f \
+    "$TEST_ROOT/ruta con espacios/programa.i" \
+    "$TEST_ROOT/ruta con espacios/programa.s" \
+    "$TEST_ROOT/ruta con espacios/programa.o" \
+    "$TEST_ROOT/ruta con espacios/programa"
+expect_status 0 "el pipeline completo procesa rutas con espacios" \
+    "$MINIC" "$TEST_ROOT/ruta con espacios/programa.c"
+"$TEST_ROOT/ruta con espacios/programa" \
+    >"$TEST_ROOT/stdout" 2>"$TEST_ROOT/stderr"
+space_program_status=$?
+if [ "$space_program_status" -eq 2 ]; then
+    pass "el ejecutable ubicado en una ruta con espacios funciona"
+else
+    fail "el ejecutable ubicado en una ruta con espacios funciona"
+fi
+
+# GCC controlado para simular fallos de etapas posteriores.
+REAL_GCC=$(command -v gcc)
+export REAL_GCC
+mkdir "$TEST_ROOT/fake-bin"
+cat >"$TEST_ROOT/fake-bin/gcc" <<'EOF'
+#!/bin/sh
+
+stage=link
+for argument in "$@"; do
+    case "$argument" in
+        -E) stage=preprocess ;;
+        -S) stage=compile ;;
+        -c) stage=assemble ;;
+    esac
+done
+
+if [ -n "${MINIC_TEST_LOG:-}" ]; then
+    printf '%s\n' "$stage" >>"$MINIC_TEST_LOG"
+fi
+
+if [ "${MINIC_TEST_FAIL_STAGE:-}" = "$stage" ]; then
+    exit 23
+fi
+
+exec "$REAL_GCC" "$@"
+EOF
+chmod +x "$TEST_ROOT/fake-bin/gcc"
+
+cp "$TEST_ROOT/return_2.c" "$TEST_ROOT/fallo_ensamblador.c"
+: >"$TEST_ROOT/etapas_ensamblador.log"
+expect_status 5 "propaga el fallo del ensamblador" \
+    env \
+    "PATH=$TEST_ROOT/fake-bin:$PATH" \
+    MINIC_TEST_FAIL_STAGE=assemble \
+    "MINIC_TEST_LOG=$TEST_ROOT/etapas_ensamblador.log" \
+    "$MINIC" -c "$TEST_ROOT/fallo_ensamblador.c"
+if [ ! -e "$TEST_ROOT/fallo_ensamblador.o" ] &&
+   [ ! -e "$TEST_ROOT/fallo_ensamblador.i" ] &&
+   [ ! -e "$TEST_ROOT/fallo_ensamblador.s" ] &&
+   ! grep -q '^link$' "$TEST_ROOT/etapas_ensamblador.log"; then
+    pass "un fallo del ensamblador limpia y evita el enlace"
+else
+    fail "un fallo del ensamblador limpia y evita el enlace"
+fi
+
+cp "$TEST_ROOT/return_2.c" "$TEST_ROOT/fallo_enlazador.c"
+expect_status 6 "propaga el fallo del enlazador" \
+    env \
+    "PATH=$TEST_ROOT/fake-bin:$PATH" \
+    MINIC_TEST_FAIL_STAGE=link \
+    "$MINIC" --keep-temp "$TEST_ROOT/fallo_enlazador.c"
+if [ ! -e "$TEST_ROOT/fallo_enlazador" ] &&
+   [ -f "$TEST_ROOT/fallo_enlazador.i" ] &&
+   [ -f "$TEST_ROOT/fallo_enlazador.s" ] &&
+   [ -f "$TEST_ROOT/fallo_enlazador.o" ]; then
+    pass "un fallo del enlace conserva intermedios solicitados"
+else
+    fail "un fallo del enlace conserva intermedios solicitados"
+fi
+
 expect_status 1 "rechaza la ausencia de entrada" "$MINIC"
 expect_status 2 "rechaza un archivo inexistente" \
     "$MINIC" "$TEST_ROOT/inexistente.c"
@@ -183,6 +361,8 @@ expect_status 1 "rechaza -P repetida" \
     "$MINIC" -P -P "$TEST_ROOT/return_2.c"
 expect_status 1 "rechaza etapas incompatibles" \
     "$MINIC" -E -S "$TEST_ROOT/return_2.c"
+expect_status 1 "rechaza -S y -c simultáneas" \
+    "$MINIC" -S -c "$TEST_ROOT/return_2.c"
 expect_status 1 "detecta el argumento ausente de -o" \
     "$MINIC" "$TEST_ROOT/return_2.c" -o
 expect_status 1 "rechaza varias entradas" \
@@ -214,6 +394,14 @@ if [ ! -e "$TEST_ROOT/error.s" ]; then
     pass "no genera ensamblador después de fallar el preprocesador"
 else
     fail "no genera ensamblador después de fallar el preprocesador"
+fi
+
+expect_status 3 "un fallo al preprocesar impide el enlace" \
+    "$MINIC" "$TEST_ROOT/error.c"
+if [ ! -e "$TEST_ROOT/error" ]; then
+    pass "no genera ejecutable después de fallar el preprocesador"
+else
+    fail "no genera ejecutable después de fallar el preprocesador"
 fi
 
 printf '\n%d pruebas correctas; %d pruebas fallidas\n' "$PASSED" "$FAILED"

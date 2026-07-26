@@ -2,3 +2,5 @@
 /minic
 /examples/*.i
 /examples/*.s
+/examples/*.o
+/examples/return_2

@@ -1,92 +1,113 @@
-# Arquitectura de MiniC — Entrega 2
+# Arquitectura de MiniC — Entrega 3
 
-La segunda entrega ofrece dos puntos de detención:
+## Pipeline
 
 ```text
-                         -E
-archivo.c → GCC -E ─────────────→ archivo.i
-             │
-             │ -S
-             └→ archivo.i → compileFile() → archivo.s
+Fuente .c
+   │
+   ├─ GCC -E -P
+   ▼
+Preprocesado .i
+   │
+   ├─ compileFile() — mock con GCC
+   ▼
+Ensamblador .s
+   │
+   ├─ GCC -c -x assembler
+   ▼
+Objeto .o
+   │
+   ├─ GCC
+   ▼
+Ejecutable
 ```
 
-Para `-E`, la opción `-P` controla si GCC elimina los marcadores de línea. Para
-`-S`, el driver activa `-P` internamente y entrega el `.i` limpio a
-`compileFile()`.
+Las opciones `-E`, `-S` y `-c` detienen el recorrido después de la etapa
+correspondiente. Sin una opción de detención se ejecutan las cuatro etapas.
 
-## Módulos
+## Separación de responsabilidades
 
 | Módulo | Responsabilidad |
 |---|---|
 | `main.c` | Inicializa las opciones, ejecuta el driver y devuelve su código de salida. |
-| `options.c` | Interpreta argumentos, valida opciones y determina la etapa y el producto final. |
-| `driver.c` | Coordina el pipeline, los archivos temporales y la detención ante errores. |
-| `process.c` | Ejecuta GCC mediante `fork()`, `execvp()` y `waitpid()`. |
-| `compiler.c` | Implementa temporalmente `compileFile()` como un mock que delega la generación de ensamblador en GCC. |
-| `diagnostics.c` | Uniforma mensajes del driver, información detallada y errores con ubicación. |
+| `options.c` | Interpreta argumentos, selecciona la etapa final y determina el producto. |
+| `driver.c` | Coordina el pipeline, los temporales, el ensamblado y el enlace. |
+| `process.c` | Ejecuta procesos externos mediante `fork()`, `execvp()` y `waitpid()`. |
+| `compiler.c` | Implementa `compileFile()`; actualmente contiene el mock basado en GCC. |
+| `diagnostics.c` | Presenta errores e información del modo detallado. |
 
-## Interfaz con el compilador
+El driver conoce `compileFile()`, pero no conoce cómo se implementa la
+compilación de MiniC. Esta dependencia apunta a una interfaz, no al lexer ni al
+parser.
 
-El driver solo conoce la interfaz declarada en `compiler.h`:
+## Punto futuro para lexer y parser
+
+`src/compiler.c` contiene un comentario marcado como:
+
+```text
+PUNTO EXACTO PARA INCORPORAR EL COMPILADOR REAL
+```
+
+El bloque que construye y ejecuta el comando `gcc -S` deberá reemplazarse allí
+por llamadas semejantes a:
+
+```text
+Lexer           lexer = lexerCreate(preprocessedPath)
+TokenStream     tokens = lexerScan(lexer)
+Parser          parser = parserCreate(tokens)
+AstProgram      program = parserParseProgram(parser)
+                semanticValidate(program)
+                generateAssembly(program, assemblyPath)
+```
+
+El lexer, parser, AST, análisis semántico y generador deberán residir en módulos
+propios. No deben añadirse a `driver.c`, `options.c` ni `process.c`.
+
+La firma pública se conserva:
 
 ```c
-typedef struct {
-    int success;
-    int errorCount;
-} CompilationResult;
-
 CompilationResult compileFile(
     const char *preprocessedPath,
     const char *assemblyPath
 );
 ```
 
-Esta separación permite incorporar el lexer, un AST, análisis semántico y un
-generador de código propio sin trasladar esas responsabilidades al driver.
+Por ello, reemplazar el mock no afectará las etapas de preprocesamiento,
+ensamblado, enlace ni la interfaz de línea de comandos.
 
-## Compilador simulado
+## Gestión de productos
 
-Entrega 2 no implementa todavía la gramática de MiniC. `compileFile()` ejecuta:
-
-```bash
-gcc -S -x cpp-output entrada.i -o salida.s
-```
-
-`-x cpp-output` informa a GCC que la entrada ya está preprocesada. Esto es
-necesario porque el nombre temporal no siempre termina en `.i`.
-
-El mock existe para verificar la coordinación completa
-`programa.c → programa.i → programa.s`. El archivo `compiler.c` concentra esta
-dependencia temporal. Cuando se implemente el compilador real, el cuerpo de
-`compileFile()` se reemplazará conceptualmente por:
+Cada etapa escribe inicialmente en un archivo creado con `mkstemp()`. El
+producto se publica con `rename()` solo después de un resultado exitoso.
 
 ```text
-lex → parse → validate → generateAssembly
+Sin --keep-temp:
+    temporales únicos → se eliminan al terminar
+
+Con --keep-temp:
+    temporal .i → programa.i
+    temporal .s → programa.s
+    temporal .o → programa.o
 ```
 
-El driver y la interfaz pública no necesitarán cambios.
+Si una etapa falla:
 
-## Archivos temporales
+1. no se ejecutan etapas posteriores;
+2. se conserva cualquier intermedio solicitado mediante `--keep-temp`;
+3. se eliminan los demás temporales;
+4. no se reemplaza el producto final anterior;
+5. se devuelve el código correspondiente a la etapa.
 
-Los productos se escriben primero en archivos creados con `mkstemp()`. Solo se
-publican mediante `rename()` después de que una etapa termina correctamente.
-Así, un error no reemplaza una salida anterior por un archivo parcial.
+## Ejecución segura
 
-Durante `-S`, el `.i` intermedio se elimina normalmente. Con `--keep-temp`, se
-publica junto al archivo fuente y se conserva incluso cuando el compilador
-encuentra un error posterior.
+Los comandos se representan como vectores de argumentos terminados en `NULL`.
+`execvp()` los entrega directamente a GCC sin pasar por un shell, por lo que
+las rutas con espacios no requieren escape especial.
 
-## Manejo de errores
+Como los temporales no siempre terminan con la extensión tradicional, el
+driver indica explícitamente el lenguaje:
 
-Cada etapa detiene el pipeline cuando falla:
+- `-x cpp-output` para el archivo preprocesado;
+- `-x assembler` para el archivo ensamblador.
 
-```text
-fallo de GCC       → código 3 → no se ejecuta compileFile()
-error del mock     → código 4 → no se publica el archivo .s
-```
-
-Durante esta entrega, los diagnósticos de sintaxis proceden de GCC. El módulo
-de diagnósticos ya ofrece una función para asociar errores con archivo, línea y
-columna cuando se incorpore el lexer/parser real.
-
-El ensamblado y el enlace permanecen fuera del alcance de esta entrega.
+Esto evita depender del sufijo aleatorio del nombre temporal.

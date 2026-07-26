@@ -15,7 +15,7 @@
 #include <string.h>
 
 /* Versión mostrada por la opción --version. */
-#define MINIC_VERSION "0.2.0"
+#define MINIC_VERSION "0.3.0"
 
 /*
  * Comprueba únicamente que la ruta termine en ".c".
@@ -31,25 +31,47 @@ static int hasCExtension(const char *path) {
 /*
  * Construye el nombre predeterminado del producto solicitado.
  *
- * Como la extensión ".c" ya fue validada, basta sustituir su último carácter:
- * "programa.c" se convierte en "programa.i" o "programa.s". La memoria
- * pertenece al llamador y debe liberarse con free().
+ * Como la extensión ".c" ya fue validada, se elimina antes de añadir la
+ * extensión correspondiente. Para STAGE_LINK no se añade extensión.
  */
 static char *deriveOutputPath(
     const char *inputPath,
     CompilationStage finalStage
 ) {
-    size_t length = strlen(inputPath);
-    char *outputPath = malloc(length + 1);
+    const char *extension;
+    size_t inputLength = strlen(inputPath);
+    size_t baseLength = inputLength - 2;
+    size_t extensionLength;
+    char *outputPath;
+
+    switch (finalStage) {
+        case STAGE_PREPROCESS:
+            extension = ".i";
+            break;
+        case STAGE_COMPILE:
+            extension = ".s";
+            break;
+        case STAGE_ASSEMBLE:
+            extension = ".o";
+            break;
+        case STAGE_LINK:
+            extension = "";
+            break;
+        default:
+            extension = "";
+            break;
+    }
+
+    extensionLength = strlen(extension);
+    outputPath = malloc(baseLength + extensionLength + 1);
 
     if (outputPath == NULL) {
         diagnosticError("no hay memoria suficiente para determinar la salida");
         return NULL;
     }
 
-    memcpy(outputPath, inputPath, length + 1);
-    outputPath[length - 1] =
-        finalStage == STAGE_PREPROCESS ? 'i' : 's';
+    memcpy(outputPath, inputPath, baseLength);
+    memcpy(outputPath + baseLength, extension, extensionLength + 1);
     return outputPath;
 }
 
@@ -79,7 +101,7 @@ void initializeOptions(DriverOptions *options) {
     options->inputPath = NULL;
     options->outputPath = NULL;
     options->action = ACTION_RUN_PIPELINE;
-    options->finalStage = STAGE_PREPROCESS;
+    options->finalStage = STAGE_LINK;
     options->suppressLineMarkers = 0;
     options->verbose = 0;
     options->keepTemporaryFiles = 0;
@@ -89,8 +111,8 @@ void initializeOptions(DriverOptions *options) {
  * Analiza la línea de comandos de izquierda a derecha.
  *
  * Retorna un DriverExitCode: DRIVER_SUCCESS si las opciones son válidas o un
- * código distinto de cero después de mostrar un diagnóstico. En la Entrega 2
- * se admite un solo archivo fuente y las opciones -E, -S, -P, -o, -v,
+ * código distinto de cero después de mostrar un diagnóstico. En la Entrega 3
+ * se admite un solo archivo fuente y las opciones -E, -S, -c, -P, -o, -v,
  * --keep-temp, --help y --version.
  */
 int parseArguments(int argc, char *argv[], DriverOptions *options) {
@@ -125,7 +147,8 @@ int parseArguments(int argc, char *argv[], DriverOptions *options) {
 
         if (
             strcmp(argument, "-E") == 0 ||
-            strcmp(argument, "-S") == 0
+            strcmp(argument, "-S") == 0 ||
+            strcmp(argument, "-c") == 0
         ) {
             if (stageOption != NULL) {
                 if (strcmp(stageOption, argument) == 0) {
@@ -143,10 +166,13 @@ int parseArguments(int argc, char *argv[], DriverOptions *options) {
                 return DRIVER_USAGE_ERROR;
             }
             stageOption = argument;
-            options->finalStage =
-                strcmp(argument, "-E") == 0
-                    ? STAGE_PREPROCESS
-                    : STAGE_COMPILE;
+            if (strcmp(argument, "-E") == 0) {
+                options->finalStage = STAGE_PREPROCESS;
+            } else if (strcmp(argument, "-S") == 0) {
+                options->finalStage = STAGE_COMPILE;
+            } else {
+                options->finalStage = STAGE_ASSEMBLE;
+            }
         } else if (strcmp(argument, "-P") == 0) {
             if (suppressMarkersOptionSeen) {
                 diagnosticError("la opción '-P' se especificó más de una vez");
@@ -243,28 +269,29 @@ void destroyOptions(DriverOptions *options) {
     options->outputPath = NULL;
 }
 
-/* Muestra la interfaz disponible hasta la Entrega 2. */
+/* Muestra la interfaz completa de la Entrega 3. */
 void printHelp(void) {
     puts(
         "Uso: minic [opciones] archivo.c\n"
         "\n"
-        "Driver de MiniC — Entrega 2.\n"
+        "Driver de MiniC — Entrega 3.\n"
         "\n"
         "Opciones:\n"
         "  -E              Ejecuta solamente el preprocesamiento\n"
         "  -S              Genera ensamblador y se detiene\n"
+        "  -c              Genera un archivo objeto y se detiene\n"
         "  -P              Elimina los marcadores de línea del resultado\n"
         "  -o archivo      Escribe el resultado en archivo\n"
         "  -v              Muestra las etapas y comandos ejecutados\n"
-        "  --keep-temp     Conserva el archivo preprocesado con -S\n"
+        "  --keep-temp     Conserva los archivos intermedios\n"
         "  --help          Muestra esta ayuda\n"
         "  --version       Muestra la versión\n"
         "\n"
-        "Sin -o, la salida usa la extensión .i para -E y .s para -S."
+        "Sin opción de etapa, genera un ejecutable sin extensión."
     );
 }
 
 /* Muestra una versión breve, apropiada para scripts y reportes de errores. */
 void printVersion(void) {
-    puts("minic " MINIC_VERSION " (Entrega 2)");
+    puts("minic " MINIC_VERSION " (Entrega 3)");
 }
