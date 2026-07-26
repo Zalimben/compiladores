@@ -2,4 +2,5 @@
 .idea
 
 # Ignore executable
-anlex
+miniPascal/anlex
+miniC/minic
