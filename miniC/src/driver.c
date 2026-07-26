@@ -1,12 +1,13 @@
 /*
  * Coordinación del pipeline de MiniC.
  *
- * En la Entrega 1 el pipeline termina después del preprocesamiento:
+ * En la Entrega 2 están disponibles dos recorridos:
  *
- *     archivo.c -> GCC -E -> archivo.i
+ *     -E: archivo.c -> GCC -E       -> archivo.i
+ *     -S: archivo.c -> GCC -E -P    -> compileFile() -> archivo.s
  *
- * El driver valida la entrada, prepara una salida temporal, ejecuta la
- * herramienta externa y publica el resultado solo cuando la etapa tiene éxito.
+ * El driver administra argumentos, archivos y etapas. En esta entrega,
+ * compiler.c implementa compileFile() como un mock basado en GCC.
  */
 
 /*
@@ -17,6 +18,7 @@
 
 #include "driver.h"
 
+#include "compiler.h"
 #include "diagnostics.h"
 #include "process.h"
 
@@ -27,13 +29,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/*
- * Verifica que la entrada exista, sea un archivo regular y pueda leerse.
- *
- * stat() obtiene información del objeto indicado por la ruta; S_ISREG evita
- * aceptar directorios u otros objetos especiales. access() comprueba el
- * permiso efectivo de lectura del proceso actual.
- */
 static int validateInput(const char *inputPath) {
     struct stat information;
 
@@ -56,47 +51,55 @@ static int validateInput(const char *inputPath) {
 }
 
 /*
- * Reserva un nombre temporal en el mismo directorio que la salida final.
- *
- * mkstemp() sustituye las seis X por caracteres únicos y crea el archivo de
- * forma segura, evitando colisiones entre procesos. La función devuelve una
- * cadena dinámica que el llamador debe liberar, o NULL si ocurre un error.
- *
- * Crear el temporal junto a la salida permite que rename() publique luego el
- * resultado de manera atómica dentro del mismo sistema de archivos.
+ * Devuelve una nueva ruta con la extensión indicada. El archivo de entrada ya
+ * fue validado como .c, por lo que se eliminan sus dos últimos caracteres.
  */
-static char *createTemporaryPath(const char *outputPath) {
-    static const char suffix[] = ".tmp.XXXXXX";
+static char *replaceExtension(const char *path, const char *extension) {
+    size_t pathLength = strlen(path);
+    size_t extensionLength = strlen(extension);
+    size_t resultLength = pathLength - 2 + extensionLength;
+    char *result = malloc(resultLength + 1);
 
-    /*
-     * sizeof(suffix) incluye el byte nulo final, por lo que la suma reserva
-     * exactamente el espacio necesario para ambas cadenas.
-     */
-    size_t requiredLength = strlen(outputPath) + sizeof(suffix);
+    if (result == NULL) {
+        diagnosticError("no hay memoria suficiente para preparar una ruta");
+        return NULL;
+    }
+
+    memcpy(result, path, pathLength - 2);
+    memcpy(result + pathLength - 2, extension, extensionLength + 1);
+    return result;
+}
+
+/*
+ * Reserva un nombre temporal junto al archivo indicado.
+ *
+ * mkstemp() sustituye XXXXXX por caracteres únicos y crea el archivo de forma
+ * segura. Al ubicar el temporal en el mismo directorio, rename() puede publicar
+ * después el resultado de manera atómica.
+ */
+static char *createTemporaryPath(const char *nearPath) {
+    static const char suffix[] = ".tmp.XXXXXX";
+    size_t requiredLength = strlen(nearPath) + sizeof(suffix);
     char *temporaryPath = malloc(requiredLength);
     int descriptor;
 
     if (temporaryPath == NULL) {
-        diagnosticError("no hay memoria suficiente para preparar la salida");
+        diagnosticError("no hay memoria suficiente para preparar un temporal");
         return NULL;
     }
 
-    snprintf(temporaryPath, requiredLength, "%s%s", outputPath, suffix);
+    snprintf(temporaryPath, requiredLength, "%s%s", nearPath, suffix);
     descriptor = mkstemp(temporaryPath);
     if (descriptor < 0) {
         diagnosticError(
             "no se pudo crear un archivo temporal para '%s': %s",
-            outputPath,
+            nearPath,
             strerror(errno)
         );
         free(temporaryPath);
         return NULL;
     }
 
-    /*
-     * Solo se necesitaba que mkstemp() reservara el nombre con seguridad. GCC
-     * abrirá nuevamente el archivo cuando escriba la salida preprocesada.
-     */
     if (close(descriptor) != 0) {
         diagnosticError(
             "no se pudo cerrar el archivo temporal '%s': %s",
@@ -111,15 +114,30 @@ static char *createTemporaryPath(const char *outputPath) {
     return temporaryPath;
 }
 
+static void showCommand(char *const arguments[]) {
+    size_t index;
+
+    fputs("minic: comando:", stderr);
+    for (index = 0; arguments[index] != NULL; ++index) {
+        fprintf(stderr, " '%s'", arguments[index]);
+    }
+    fputc('\n', stderr);
+}
+
 /*
- * Ejecuta la etapa de preprocesamiento y publica su producto.
+ * Ejecuta GCC como preprocesador y publica la salida de manera atómica.
  *
- * Se escribe primero en un temporal. Si GCC falla, ese archivo se elimina y
- * una salida anterior permanece intacta. El vector arguments termina en NULL
- * porque ese es el formato exigido por execvp().
+ * La opción suppressLineMarkers determina si se pasa -P. La compilación a
+ * ensamblador siempre la activa para entregar al mock la representación limpia
+ * que recibirá posteriormente el compilador MiniC real.
  */
-static int preprocess(const DriverOptions *options) {
-    char *temporaryPath = createTemporaryPath(options->outputPath);
+static int preprocess(
+    const char *inputPath,
+    const char *outputPath,
+    int suppressLineMarkers,
+    int verbose
+) {
+    char *temporaryPath = createTemporaryPath(outputPath);
     ProcessResult result;
     char *arguments[8];
     int argumentIndex = 0;
@@ -130,32 +148,26 @@ static int preprocess(const DriverOptions *options) {
 
     arguments[argumentIndex++] = "gcc";
     arguments[argumentIndex++] = "-E";
-
-    /*
-     * -P es opcional: con esta bandera GCC elimina los marcadores que indican
-     * el archivo y número de línea de procedencia del texto preprocesado.
-     */
-    if (options->suppressLineMarkers) {
+    if (suppressLineMarkers) {
         arguments[argumentIndex++] = "-P";
     }
-    arguments[argumentIndex++] = (char *) options->inputPath;
+    arguments[argumentIndex++] = (char *) inputPath;
     arguments[argumentIndex++] = "-o";
     arguments[argumentIndex++] = temporaryPath;
     arguments[argumentIndex] = NULL;
 
-    result = runProcess(arguments);
+    if (verbose) {
+        diagnosticInfo("preprocesamiento: %s -> %s", inputPath, outputPath);
+        showCommand(arguments);
+    }
 
-    /* Un fallo al crear o esperar el proceso es un error interno del driver. */
+    result = runProcess(arguments);
     if (!result.started) {
         unlink(temporaryPath);
         free(temporaryPath);
         return DRIVER_INTERNAL_ERROR;
     }
 
-    /*
-     * POSIX distingue entre terminación por señal y terminación normal. Solo
-     * en el segundo caso existe un exitCode que pueda compararse con cero.
-     */
     if (!result.exited) {
         diagnosticError(
             "el preprocesador terminó por la señal %d",
@@ -176,14 +188,10 @@ static int preprocess(const DriverOptions *options) {
         return DRIVER_PREPROCESS_ERROR;
     }
 
-    /*
-     * rename() reemplaza el nombre final únicamente después de confirmar el
-     * éxito de GCC. Si falla, todavía se puede eliminar el temporal.
-     */
-    if (rename(temporaryPath, options->outputPath) != 0) {
+    if (rename(temporaryPath, outputPath) != 0) {
         diagnosticError(
             "no se pudo crear la salida '%s': %s",
-            options->outputPath,
+            outputPath,
             strerror(errno)
         );
         unlink(temporaryPath);
@@ -195,13 +203,144 @@ static int preprocess(const DriverOptions *options) {
     return DRIVER_SUCCESS;
 }
 
+static void removeTemporary(const char *path) {
+    if (path != NULL && unlink(path) != 0 && errno != ENOENT) {
+        diagnosticError(
+            "no se pudo eliminar el temporal '%s': %s",
+            path,
+            strerror(errno)
+        );
+    }
+}
+
 /*
- * Ejecuta la acción solicitada y retorna un DriverExitCode.
+ * Completa el recorrido archivo.c -> archivo.i -> archivo.s.
  *
- * Las acciones informativas no necesitan validar un archivo. Para una
- * compilación, en cambio, se detiene inmediatamente ante cualquier error:
- * ninguna etapa posterior debe ejecutarse si una anterior falla.
+ * El .i usa un nombre único mientras es temporal. Con --keep-temp se publica
+ * como producto.i antes de llamar al compilador; así también permanece
+ * disponible cuando el compilador encuentra un error.
  */
+static int runCompilation(const DriverOptions *options) {
+    char *intermediateProduct = replaceExtension(options->inputPath, ".i");
+    char *intermediateTemporary = NULL;
+    char *assemblyTemporary = NULL;
+    const char *compilationInput;
+    CompilationResult compilationResult;
+    int result;
+
+    if (intermediateProduct == NULL) {
+        return DRIVER_INTERNAL_ERROR;
+    }
+
+    if (
+        options->keepTemporaryFiles &&
+        strcmp(intermediateProduct, options->outputPath) == 0
+    ) {
+        diagnosticError(
+            "la salida '%s' coincide con el archivo intermedio",
+            options->outputPath
+        );
+        free(intermediateProduct);
+        return DRIVER_USAGE_ERROR;
+    }
+
+    intermediateTemporary = createTemporaryPath(intermediateProduct);
+    if (intermediateTemporary == NULL) {
+        free(intermediateProduct);
+        return DRIVER_TEMPORARY_ERROR;
+    }
+
+    /*
+     * -P se usa internamente aunque el usuario no lo indique: los marcadores
+     * son útiles para compiladores completos, pero no son necesarios para el
+     * contrato actual de compileFile().
+     */
+    result = preprocess(
+        options->inputPath,
+        intermediateTemporary,
+        1,
+        options->verbose
+    );
+    if (result != DRIVER_SUCCESS) {
+        removeTemporary(intermediateTemporary);
+        free(intermediateTemporary);
+        free(intermediateProduct);
+        return result;
+    }
+
+    compilationInput = intermediateTemporary;
+    if (options->keepTemporaryFiles) {
+        if (rename(intermediateTemporary, intermediateProduct) != 0) {
+            diagnosticError(
+                "no se pudo conservar el intermedio '%s': %s",
+                intermediateProduct,
+                strerror(errno)
+            );
+            removeTemporary(intermediateTemporary);
+            free(intermediateTemporary);
+            free(intermediateProduct);
+            return DRIVER_TEMPORARY_ERROR;
+        }
+        compilationInput = intermediateProduct;
+    }
+
+    assemblyTemporary = createTemporaryPath(options->outputPath);
+    if (assemblyTemporary == NULL) {
+        if (!options->keepTemporaryFiles) {
+            removeTemporary(intermediateTemporary);
+        }
+        free(intermediateTemporary);
+        free(intermediateProduct);
+        return DRIVER_TEMPORARY_ERROR;
+    }
+
+    if (options->verbose) {
+        diagnosticInfo(
+            "compilación MiniC (mock): %s -> %s",
+            compilationInput,
+            options->outputPath
+        );
+    }
+
+    setCompilerVerbose(options->verbose);
+    compilationResult = compileFile(compilationInput, assemblyTemporary);
+    if (!compilationResult.success) {
+        removeTemporary(assemblyTemporary);
+        if (!options->keepTemporaryFiles) {
+            removeTemporary(intermediateTemporary);
+        }
+        free(assemblyTemporary);
+        free(intermediateTemporary);
+        free(intermediateProduct);
+        return DRIVER_COMPILER_ERROR;
+    }
+
+    if (rename(assemblyTemporary, options->outputPath) != 0) {
+        diagnosticError(
+            "no se pudo crear la salida '%s': %s",
+            options->outputPath,
+            strerror(errno)
+        );
+        removeTemporary(assemblyTemporary);
+        if (!options->keepTemporaryFiles) {
+            removeTemporary(intermediateTemporary);
+        }
+        free(assemblyTemporary);
+        free(intermediateTemporary);
+        free(intermediateProduct);
+        return DRIVER_OUTPUT_ERROR;
+    }
+
+    if (!options->keepTemporaryFiles) {
+        removeTemporary(intermediateTemporary);
+    }
+
+    free(assemblyTemporary);
+    free(intermediateTemporary);
+    free(intermediateProduct);
+    return DRIVER_SUCCESS;
+}
+
 int runDriver(const DriverOptions *options) {
     int validationResult;
 
@@ -220,11 +359,24 @@ int runDriver(const DriverOptions *options) {
         return validationResult;
     }
 
-    /* Evita que una opción -o sobrescriba directamente el archivo fuente. */
     if (strcmp(options->inputPath, options->outputPath) == 0) {
         diagnosticError("la entrada y la salida no pueden ser el mismo archivo");
         return DRIVER_USAGE_ERROR;
     }
 
-    return preprocess(options);
+    if (options->finalStage == STAGE_PREPROCESS) {
+        return preprocess(
+            options->inputPath,
+            options->outputPath,
+            options->suppressLineMarkers,
+            options->verbose
+        );
+    }
+
+    if (options->finalStage == STAGE_COMPILE) {
+        return runCompilation(options);
+    }
+
+    diagnosticError("la etapa solicitada todavía no está implementada");
+    return DRIVER_INTERNAL_ERROR;
 }

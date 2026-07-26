@@ -7,6 +7,7 @@ SOURCES := \
 	src/main.c \
 	src/options.c \
 	src/driver.c \
+	src/compiler.c \
 	src/process.c \
 	src/diagnostics.c
 OBJECTS := $(SOURCES:src/%.c=build/%.o)
