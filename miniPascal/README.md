@@ -1,10 +1,7 @@
-compiladores
+Compiladores y Lenguajes de Bajo Nivel
 ============
 
-**Compiladores FPUNA** 
-
-Práctica de Programación Nro. 1
-
+Asignatura Compiladores y Lenguajes de Bajo Nivel de la carrera LCiK - FP-UNA 
 Autor: Julio Paciello
 
 ## Descripción
